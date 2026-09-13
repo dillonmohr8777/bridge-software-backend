@@ -78,7 +78,24 @@ const envSchema = z.object({
 
     EIN_ENCRYPTION_KEY: optionalEinEncryptionKey,
 
-    EIN_ENCRYPTION_KEY_VERSION: z.coerce.number().int().positive().default(1)
+    EIN_ENCRYPTION_KEY_VERSION: z.coerce.number().int().positive().default(1),
+
+    RESEND_API_KEY: optionalString,
+
+    DIRECTORY_EMAIL_FROM: optionalString,
+
+    DIRECTORY_EMAIL_REPLY_TO: z.preprocess(
+        (value) => (value === "" ? undefined : value),
+        z.email().optional()
+    )
+}).superRefine((value, context) => {
+    const emailValues = [value.RESEND_API_KEY, value.DIRECTORY_EMAIL_FROM];
+    if (emailValues.some(Boolean) && !emailValues.every(Boolean)) {
+        context.addIssue({ code: "custom", message: "RESEND_API_KEY and DIRECTORY_EMAIL_FROM must be configured together." });
+    }
+    if (emailValues.every(Boolean) && !value.SUPABASE_SERVICE_ROLE_KEY) {
+        context.addIssue({ code: "custom", message: "SUPABASE_SERVICE_ROLE_KEY is required for directory email delivery." });
+    }
 });
 
 const result = envSchema.safeParse(process.env);
