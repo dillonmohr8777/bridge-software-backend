@@ -23,7 +23,8 @@ begin
     select vc.id into target_case_id
     from public.verification_cases vc
     where vc.id::text = new.metadata->>'verification_case_id'
-      and vc.organization_id = new.organization_id;
+      and vc.organization_id = new.organization_id
+    for update of vc;
 
     if target_case_id is null then
         return new;
