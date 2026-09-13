@@ -102,7 +102,7 @@ test("resend verification uses the configured email redirect", () => {
     );
 });
 
-test("successful login issues HttpOnly cookie credentials and preserves token response", async () => {
+test("successful login keeps credentials in HttpOnly cookies and returns only the user", async () => {
     const result = {
         accessToken: "access-secret",
         refreshToken: "refresh-secret",
@@ -124,7 +124,8 @@ test("successful login issues HttpOnly cookie credentials and preserves token re
         } as never,
         (() => undefined) as never
     );
-    assert.deepEqual(body, result);
+    assert.deepEqual(body, { user: result.user });
+    assert.deepEqual(cookies.map(({ value }) => value), [result.accessToken, result.refreshToken]);
     assert.deepEqual(cookies.map(({ name }) => name), [
         ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE
     ]);
