@@ -3,7 +3,6 @@ import { Router, type Response } from "express";
 import { loadApplicationIdentity } from "../../middleware/application-identity.js";
 import { requireAuthentication } from "../../middleware/authentication.js";
 import {
-    requireAnyOrganizationPermission,
     requirePermission
 } from "../../middleware/authorization.js";
 import {
@@ -13,11 +12,15 @@ import {
 import {
     einIntakeParamsSchema,
     einIntakeSchema,
+    einAttemptAbandonSchema,
+    einAttemptParamsSchema,
     einRevealParamsSchema,
     einVerificationParamsSchema,
+    type EinAttemptAbandonInput,
     type EinIntakeInput
 } from "../../schemas/ein.js";
 import {
+    abandonEinVerification,
     EinServiceError,
     intakeEin,
     revealEin,
@@ -42,6 +45,7 @@ const sendEinError = (res: Response, error: unknown): void => {
     const statusByCode: Record<EinServiceError["code"], number> = {
         BUSINESS_NOT_FOUND: 404,
         VERIFICATION_ITEM_NOT_FOUND: 404,
+        EIN_VERIFICATION_ATTEMPT_NOT_FOUND: 404,
         EIN_NOT_FOUND: 404,
         FORBIDDEN: 403,
         EIN_ENCRYPTION_UNAVAILABLE: 503,
@@ -55,6 +59,7 @@ const sendEinError = (res: Response, error: unknown): void => {
     const messageByCode: Record<EinServiceError["code"], string> = {
         BUSINESS_NOT_FOUND: "Business not found.",
         VERIFICATION_ITEM_NOT_FOUND: "Verification item not found.",
+        EIN_VERIFICATION_ATTEMPT_NOT_FOUND: "EIN verification attempt not found.",
         EIN_NOT_FOUND: "EIN not found.",
         FORBIDDEN: "You do not have permission to perform this action.",
         EIN_ENCRYPTION_UNAVAILABLE: "EIN encryption is unavailable.",
@@ -140,14 +145,42 @@ router.post(
 );
 
 router.post(
+    "/ein-verifications/:einVerificationId/abandon",
+    requireAuthentication,
+    loadApplicationIdentity,
+    requirePermission("admin:verification_review"),
+    validateParams(einAttemptParamsSchema),
+    validateBody(einAttemptAbandonSchema),
+    async (req, res) => {
+        const authentication = req.authentication;
+        if (!authentication) {
+            res.status(401).json({
+                error: "UNAUTHORIZED",
+                message: "A valid Bearer access token is required."
+            });
+            return;
+        }
+
+        try {
+            const { einVerificationId } = req.params as { einVerificationId: string };
+            const result = await abandonEinVerification(
+                authentication.user.id,
+                einVerificationId,
+                req.body as EinAttemptAbandonInput
+            );
+            res.status(200).json(result);
+        } catch (error) {
+            sendEinError(res, error);
+        }
+    }
+);
+
+router.post(
     "/verification-items/:verificationItemId/ein/verify",
     requireAuthentication,
     loadApplicationIdentity,
     validateParams(einVerificationParamsSchema),
-    requireAnyOrganizationPermission(
-        "verification:review",
-        "admin:verification_review"
-    ),
+    requirePermission("admin:verification_review"),
     async (req, res) => {
         const authentication = req.authentication;
 

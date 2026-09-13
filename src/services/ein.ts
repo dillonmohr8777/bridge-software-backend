@@ -5,7 +5,7 @@ import {
     createUserScopedSupabaseClient,
     SupabaseAdminNotConfiguredError
 } from "../lib/supabase.js";
-import type { EinIntakeInput } from "../schemas/ein.js";
+import type { EinAttemptAbandonInput, EinIntakeInput } from "../schemas/ein.js";
 import {
     decryptEin,
     EinDecryptionError,
@@ -34,7 +34,8 @@ const secretSchema = z.object({
 
 const verificationSecretSchema = secretSchema.extend({
     legal_name: z.string(),
-    ein_last_four: z.string().regex(/^[0-9]{4}$/)
+    ein_last_four: z.string().regex(/^[0-9]{4}$/),
+    secret_version: z.uuid()
 });
 
 const requestResultSchema = z.object({
@@ -48,6 +49,7 @@ const requestResultSchema = z.object({
 export type EinFailureCode =
     | "BUSINESS_NOT_FOUND"
     | "VERIFICATION_ITEM_NOT_FOUND"
+    | "EIN_VERIFICATION_ATTEMPT_NOT_FOUND"
     | "EIN_NOT_FOUND"
     | "FORBIDDEN"
     | "EIN_ENCRYPTION_UNAVAILABLE"
@@ -66,7 +68,11 @@ export class EinServiceError extends Error {
 
 const mapRpcError = (
     code: string | undefined,
-    notFoundCode: "BUSINESS_NOT_FOUND" | "VERIFICATION_ITEM_NOT_FOUND" | "EIN_NOT_FOUND"
+    notFoundCode:
+        | "BUSINESS_NOT_FOUND"
+        | "VERIFICATION_ITEM_NOT_FOUND"
+        | "EIN_VERIFICATION_ATTEMPT_NOT_FOUND"
+        | "EIN_NOT_FOUND"
 ): never => {
     if (code === "P0002") {
         throw new EinServiceError(notFoundCode);
@@ -228,7 +234,8 @@ export const verifyEin = async (
         .rpc("request_ein_verification", {
             p_verification_item_id: verificationItemId,
             p_ein_last_four: secret.data.ein_last_four,
-            p_provider: provider.name
+            p_provider: provider.name,
+            p_ein_secret_version: secret.data.secret_version
         })
         .single();
 
@@ -248,13 +255,12 @@ export const verifyEin = async (
         });
 
         const { error: completionError } = await adminClient.rpc(
-            "complete_ein_verification",
+            "complete_ein_provider_evidence",
             {
                 p_ein_verification_id: request.data.ein_verification_id,
                 p_provider_reference: result.providerReference,
                 p_result_status: result.status,
-                p_result_reason: result.reason,
-                p_item_status: result.status
+                p_result_reason: result.reason
             }
         );
 
@@ -266,7 +272,8 @@ export const verifyEin = async (
             verificationItemId: request.data.verification_item_id,
             provider: provider.name,
             providerReference: result.providerReference,
-            status: result.status,
+            status: "verification_requested",
+            suggestedDecision: result.status,
             reason: result.reason
         };
     } catch (error) {
@@ -275,13 +282,12 @@ export const verifyEin = async (
         }
 
         const { error: failureCompletionError } = await adminClient.rpc(
-            "complete_ein_verification",
+            "complete_ein_provider_evidence",
             {
                 p_ein_verification_id: request.data.ein_verification_id,
                 p_provider_reference: null,
                 p_result_status: "provider_error",
-                p_result_reason: "The provider request could not be completed.",
-                p_item_status: "verification_requested"
+                p_result_reason: "The provider request could not be completed."
             }
         );
 
@@ -291,4 +297,22 @@ export const verifyEin = async (
 
         throw new EinServiceError("EIN_VERIFICATION_FAILED");
     }
+};
+
+export const abandonEinVerification = async (
+    actorUserId: string,
+    einVerificationId: string,
+    input: EinAttemptAbandonInput
+) => {
+    const { error } = await getAdminClient().rpc("abandon_ein_provider_attempt", {
+        p_actor_user_id: actorUserId,
+        p_ein_verification_id: einVerificationId,
+        p_reason: input.reason
+    });
+
+    if (error) {
+        return mapRpcError(error.code, "EIN_VERIFICATION_ATTEMPT_NOT_FOUND");
+    }
+
+    return { einVerificationId, status: "abandoned" as const };
 };

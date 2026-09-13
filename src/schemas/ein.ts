@@ -21,4 +21,13 @@ export const einRevealParamsSchema = z.object({
     businessId: z.uuid()
 });
 
+export const einAttemptParamsSchema = z.object({
+    einVerificationId: z.uuid()
+});
+
+export const einAttemptAbandonSchema = z.object({
+    reason: z.string().trim().min(10).max(500)
+}).strict();
+
 export type EinIntakeInput = z.infer<typeof einIntakeSchema>;
+export type EinAttemptAbandonInput = z.infer<typeof einAttemptAbandonSchema>;

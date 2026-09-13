@@ -19,6 +19,20 @@ values ('a5555555-5555-4555-8555-555555555555','a3333333-3333-4333-8333-33333333
 insert into public.verification_items(id,verification_case_id,item_type) values
 ('a6666666-6666-4666-8666-666666666666','a5555555-5555-4555-8555-555555555555','ein'),
 ('a7777777-7777-4777-8777-777777777777','a5555555-5555-4555-8555-555555555555','cannabis_license');
+insert into public.business_ein_secrets(
+    business_id,ciphertext,iv,auth_tag,key_version,secret_version
+) values (
+    'a4444444-4444-4444-8444-444444444444','ciphertext','iv','tag',1,
+    'a1212121-1212-4212-8212-121212121212'
+);
+insert into public.ein_verifications(
+    verification_item_id,provider,provider_reference,requested_by_user_id,
+    completed_at,result_status,ein_secret_version
+) values (
+    'a6666666-6666-4666-8666-666666666666','tincomply','provider-request-1',
+    'a2222222-2222-4222-8222-222222222222',timezone('utc',now()),'verified',
+    'a1212121-1212-4212-8212-121212121212'
+);
 insert into public.directory_profiles(id,organization_id,slug,name,visibility)
 values ('a8888888-8888-4888-8888-888888888888','a3333333-3333-4333-8333-333333333333','finalization-fixture','Finalization fixture','public');
 insert into public.engagement_posts(id,profile_id,type,title,body)
