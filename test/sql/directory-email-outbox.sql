@@ -61,4 +61,30 @@ select pg_temp.assert_email(
     (select email_delivery='sent' from public.directory_requests limit 1),
     'all current events have provider receipts'
 );
+
+set local role service_role;
+insert into public.directory_email_outbox(request_id,event_type,recipient_email,status,attempt_count,first_attempted_at,attempted_at)
+select id,'submitted','crash@example.com','sending',3,now()-interval '1 hour',now()-interval '10 minutes'
+from public.directory_requests limit 1;
+select * from public.claim_directory_email_outbox(null,20);
+select pg_temp.assert_email(
+    (select status='sending' and attempt_count=4 from public.directory_email_outbox where recipient_email='crash@example.com'),
+    'stale third claim remains recoverable inside provider idempotency window'
+);
+select public.complete_directory_email_outbox(
+    (select id from public.directory_email_outbox where recipient_email='crash@example.com'),true,'provider-crash-recovery',null
+);
+insert into public.directory_email_outbox(request_id,event_type,recipient_email,status,attempt_count,first_attempted_at,attempted_at)
+select id,'submitted','expired@example.com','sending',3,now()-interval '24 hours',now()-interval '24 hours'
+from public.directory_requests limit 1;
+select * from public.claim_directory_email_outbox(null,20);
+reset role;
+select pg_temp.assert_email(
+    (select status='failed' and attempt_count=3 from public.directory_email_outbox where recipient_email='expired@example.com'),
+    'uncertain delivery expires before provider idempotency protection does'
+);
+select pg_temp.assert_email(
+    (select email_delivery='partial' from public.directory_requests limit 1),
+    'expired recipient cannot leave aggregate delivery queued'
+);
 rollback;

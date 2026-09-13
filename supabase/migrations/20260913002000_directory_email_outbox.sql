@@ -9,9 +9,10 @@ create table public.directory_email_outbox (
     event_type text not null check (event_type in ('submitted','reviewed')),
     recipient_email text not null check (length(recipient_email) between 3 and 320),
     status text not null default 'pending' check (status in ('pending','sending','sent','failed')),
-    attempt_count integer not null default 0 check (attempt_count between 0 and 3),
+    attempt_count integer not null default 0 check (attempt_count >= 0),
     provider_message_id text,
     last_error text,
+    first_attempted_at timestamptz,
     attempted_at timestamptz,
     sent_at timestamptz,
     created_at timestamptz not null default now(),
@@ -23,6 +24,31 @@ where status in ('pending','failed');
 alter table public.directory_email_outbox enable row level security;
 revoke all on public.directory_email_outbox from public,anon,authenticated;
 grant select,insert,update on public.directory_email_outbox to service_role;
+
+create function public.sync_directory_request_email_delivery()
+returns trigger language plpgsql security definer set search_path='' as $$
+begin
+    perform 1 from public.directory_requests r where r.id=new.request_id for update;
+    update public.directory_requests r set email_delivery=(
+        select case
+            when bool_and(o.status='sent') then 'sent'
+            when bool_or(
+                o.status in ('pending','sending')
+                or (o.status='failed' and o.attempt_count<3 and o.first_attempted_at>now()-interval '23 hours')
+            ) then 'queued'
+            when bool_or(o.status='sent') then 'partial'
+            else 'failed'
+        end
+        from public.directory_email_outbox o where o.request_id=r.id
+    ) where r.id=new.request_id;
+    return new;
+end;
+$$;
+revoke all on function public.sync_directory_request_email_delivery() from public,anon,authenticated;
+create trigger directory_email_sync_after_insert
+after insert on public.directory_email_outbox for each row execute function public.sync_directory_request_email_delivery();
+create trigger directory_email_sync_after_update
+after update of status,attempt_count on public.directory_email_outbox for each row execute function public.sync_directory_request_email_delivery();
 
 create function public.queue_directory_request_email()
 returns trigger language plpgsql security definer set search_path='' as $$
@@ -57,12 +83,6 @@ begin
         on conflict do nothing;
     end if;
 
-    if exists (
-        select 1 from public.directory_email_outbox o
-        where o.request_id=new.id and o.status<>'sent'
-    ) then
-        update public.directory_requests set email_delivery='queued' where id=new.id;
-    end if;
     return new;
 end;
 $$;
@@ -75,21 +95,30 @@ after update of status on public.directory_requests for each row execute functio
 create function public.claim_directory_email_outbox(p_request_id uuid default null,p_limit integer default 20)
 returns table(outbox_id uuid,request_id uuid,event_type text,recipient_email text,request_kind text,request_status text)
 language sql security definer set search_path='' as $$
-    with claimed as (
+    with expired as (
+        update public.directory_email_outbox o
+        set status='failed',attempt_count=greatest(o.attempt_count,3),
+            last_error='Delivery lease expired before provider receipt was recorded'
+        where o.status in ('sending','failed')
+          and o.first_attempted_at<=now()-interval '23 hours'
+          and (o.status='sending' or o.attempt_count<3)
+        returning o.id
+    ), claimed as (
         select o.id
         from public.directory_email_outbox o
         where (p_request_id is null or o.request_id=p_request_id)
           and (
               o.status='pending'
-              or (o.status='failed' and o.attempt_count<3)
-              or (o.status='sending' and o.attempt_count<3 and o.attempted_at<now()-interval '5 minutes')
+              or (o.status='failed' and o.attempt_count<3 and o.first_attempted_at>now()-interval '23 hours')
+              or (o.status='sending' and o.attempted_at<now()-interval '5 minutes' and o.first_attempted_at>now()-interval '23 hours')
           )
         order by o.created_at,o.id
         for update skip locked
         limit greatest(1,least(coalesce(p_limit,20),100))
     ), updated as (
         update public.directory_email_outbox o
-        set status='sending',attempt_count=o.attempt_count+1,attempted_at=now(),last_error=null
+        set status='sending',attempt_count=o.attempt_count+1,
+            first_attempted_at=coalesce(o.first_attempted_at,now()),attempted_at=now(),last_error=null
         from claimed c where o.id=c.id
         returning o.id,o.request_id,o.event_type,o.recipient_email
     )
@@ -101,7 +130,7 @@ grant execute on function public.claim_directory_email_outbox(uuid,integer) to s
 
 create function public.complete_directory_email_outbox(p_outbox_id uuid,p_sent boolean,p_provider_message_id text default null,p_error text default null)
 returns void language plpgsql security definer set search_path='' as $$
-declare target_request_id uuid;
+declare changed boolean;
 begin
     update public.directory_email_outbox
     set status=case when p_sent then 'sent' else 'failed' end,
@@ -109,21 +138,11 @@ begin
         last_error=case when p_sent then null else left(coalesce(p_error,'Email provider failed'),500) end,
         sent_at=case when p_sent then now() else null end
     where id=p_outbox_id and status='sending'
-    returning request_id into target_request_id;
+    returning true into changed;
 
-    if target_request_id is null then
+    if changed is null then
         raise exception 'Outbox item not found or not claimed' using errcode='P0002';
     end if;
-
-    update public.directory_requests r set email_delivery=(
-        select case
-            when bool_and(o.status='sent') then 'sent'
-            when bool_or(o.status in ('pending','sending') or (o.status='failed' and o.attempt_count<3)) then 'queued'
-            when bool_or(o.status='sent') then 'partial'
-            else 'failed'
-        end
-        from public.directory_email_outbox o where o.request_id=r.id
-    ) where r.id=target_request_id;
 end;
 $$;
 revoke all on function public.complete_directory_email_outbox(uuid,boolean,text,text) from public,anon,authenticated;
