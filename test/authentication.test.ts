@@ -102,7 +102,7 @@ test("resend verification uses the configured email redirect", () => {
     );
 });
 
-test("successful login issues HttpOnly cookie credentials and preserves token response", async () => {
+test("successful login keeps credentials in HttpOnly cookies and returns only the user", async () => {
     const result = {
         accessToken: "access-secret",
         refreshToken: "refresh-secret",
@@ -124,7 +124,10 @@ test("successful login issues HttpOnly cookie credentials and preserves token re
         } as never,
         (() => undefined) as never
     );
-    assert.deepEqual(body, result);
+    assert.deepEqual(body, { user: result.user });
+    assert.deepEqual(cookies.map(({ value }) => value), [
+        result.accessToken, result.refreshToken
+    ]);
     assert.deepEqual(cookies.map(({ name }) => name), [
         ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE
     ]);
@@ -168,6 +171,12 @@ test("Express emits both authentication Set-Cookie headers", async () => {
         assert.equal(setCookies.length, 2);
         assert.match(setCookies[0]!, /^bridge_access_token=/);
         assert.match(setCookies[1]!, /^bridge_refresh_token=/);
+        assert.deepEqual(await response.json(), {
+            user: {
+                id: "11111111-1111-4111-8111-111111111111",
+                email: "user@example.com"
+            }
+        });
     } finally {
         await new Promise<void>((resolve, reject) =>
             server.close((error) => error ? reject(error) : resolve())
