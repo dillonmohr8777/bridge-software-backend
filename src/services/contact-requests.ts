@@ -34,6 +34,7 @@ const transitionResultSchema = z.object({
 export type ContactRequestErrorCode =
     | "CONTACT_REQUEST_NOT_FOUND"
     | "CONTACT_REQUEST_INELIGIBLE"
+    | "CONTACT_REQUEST_FORBIDDEN"
     | "CONTACT_REQUEST_INVALID_TRANSITION"
     | "CONTACT_REQUEST_FAILED";
 
@@ -45,6 +46,9 @@ export class ContactRequestServiceError extends Error {
 }
 
 const mapRpcError = (error: { code?: string; message?: string }): never => {
+    if (error.code === "42501") {
+        throw new ContactRequestServiceError("CONTACT_REQUEST_FORBIDDEN");
+    }
     if (error.code === "P0002") {
         throw new ContactRequestServiceError("CONTACT_REQUEST_NOT_FOUND");
     }
