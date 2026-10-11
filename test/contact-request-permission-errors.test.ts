@@ -15,6 +15,8 @@ const requestId = "44444444-4444-4444-8444-444444444444";
 const query = { limit: 20, offset: 0 };
 const input = { firstName: "Jane", workEmail: "jane@example.test", phoneNumber: "+15555551212", yearsOfService: 4, contactPreference: "email" as const };
 const calls = [
+    { name: "discovery", rpc: "list_contact_inbox_organizations", call: () => services.listContactInboxOrganizations("test-user-token"), handler: () => handlers.createContactInboxOrganizationsHandler() },
+    { name: "candidates", rpc: "list_contact_routing_candidates", call: () => services.listContactRoutingCandidates("test-user-token", organizationId), handler: () => handlers.createContactRoutingCandidatesHandler() },
     { name: "create", rpc: "create_contact_request", call: () => services.createContactRequest("test-user-token", "target", input), handler: () => handlers.createContactRequestHandler() },
     { name: "inbound", rpc: "list_inbound_contact_requests", call: () => services.listInboundContactRequests("test-user-token", organizationId, query), handler: () => handlers.createInboundContactRequestsHandler() },
     { name: "sent", rpc: "list_sent_contact_requests", call: () => services.listSentContactRequests("test-user-token", query), handler: () => handlers.createSentContactRequestsHandler() },
@@ -57,7 +59,28 @@ test("database permission denials remain 403 through all contact service and HTT
         responseCode = "XX000";
         await assert.rejects(() => services.listInboundContactRequests("test-user-token", organizationId, query), (error: unknown) =>
             error instanceof services.ContactRequestServiceError && error.code === "CONTACT_REQUEST_FAILED");
-        assert.equal(count, 9);
+        assert.equal(count, 13);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("inbox discovery and candidates validate and limit response fields", async () => {
+    const originalFetch = globalThis.fetch;
+    const userId = "66666666-6666-4666-8666-666666666666";
+    const membershipId = "77777777-7777-4777-8777-777777777777";
+    let payload: unknown = [{ organization_id: organizationId, organization_name: "First org", private_note: "hidden" }];
+    globalThis.fetch = async (_request, init) => {
+        assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-user-token");
+        return new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } });
+    };
+    try {
+        assert.deepEqual(await services.listContactInboxOrganizations("test-user-token"), { organizations: [{ id: organizationId, name: "First org" }] });
+        payload = { salesRepresentatives: [{ membershipId, userId, displayName: null, email: "private@example.test" }], bridgeAdmin: null, private_note: "hidden" };
+        assert.deepEqual(await services.listContactRoutingCandidates("test-user-token", organizationId), { candidates: { salesRepresentatives: [{ membershipId, userId, displayName: null }], bridgeAdmin: null } });
+        payload = { salesRepresentatives: [{ membershipId: "invalid", userId, displayName: null }], bridgeAdmin: null };
+        await assert.rejects(() => services.listContactRoutingCandidates("test-user-token", organizationId), (error: unknown) =>
+            error instanceof services.ContactRequestServiceError && error.code === "CONTACT_REQUEST_FAILED");
     } finally {
         globalThis.fetch = originalFetch;
     }

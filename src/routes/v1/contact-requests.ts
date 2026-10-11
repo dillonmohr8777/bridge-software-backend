@@ -1,8 +1,8 @@
 import { Router, type RequestHandler, type Response } from "express";
 
 import { loadApplicationIdentity } from "../../middleware/application-identity.js";
-import { requireAuthentication } from "../../middleware/authentication.js";
 import { requirePermission } from "../../middleware/authorization.js";
+import { requireAuthentication } from "../../middleware/authentication.js";
 import { validateBody, validateParams, validateQuery } from "../../middleware/validation.js";
 import {
     contactRequestListQuerySchema,
@@ -20,13 +20,13 @@ import {
     ContactRequestServiceError,
     createContactRequest,
     listInboundContactRequests,
+    listContactInboxOrganizations,
+    listContactRoutingCandidates,
     listSentContactRequests,
     transitionContactRequest
 } from "../../services/contact-requests.js";
 
 const router = Router();
-const organizationIdFromParams = (req: { params: { organizationId?: string } }) =>
-    req.params.organizationId;
 
 const sendError = (res: Response, error: unknown): void => {
     if (!(error instanceof ContactRequestServiceError)) {
@@ -124,7 +124,8 @@ router.get(
     requireAuthentication,
     loadApplicationIdentity,
     validateParams(organizationContactRequestParamsSchema),
-    requirePermission("contact_request:read", organizationIdFromParams),
+    // The user-scoped RPC checks owner/admin or exact assigned-recipient access.
+    // Organization role alone cannot express the latter; never use a service-role client here.
     validateQuery(contactRequestListQuerySchema),
     createInboundContactRequestsHandler()
 );
@@ -134,9 +135,41 @@ router.post(
     requireAuthentication,
     loadApplicationIdentity,
     validateParams(organizationContactRequestParamsSchema),
-    requirePermission("contact_request:update", organizationIdFromParams),
+    // The database authorizes the exact organization/request pair before mutation.
     validateBody(contactRequestTransitionSchema),
     createTransitionContactRequestHandler()
+);
+
+export const createContactInboxOrganizationsHandler = (
+    service: typeof listContactInboxOrganizations = listContactInboxOrganizations
+): RequestHandler => async (req, res) => {
+    try {
+        res.status(200).json(await service(req.authentication?.accessToken ?? ""));
+    } catch (error) { sendError(res, error); }
+};
+
+export const createContactRoutingCandidatesHandler = (
+    service: typeof listContactRoutingCandidates = listContactRoutingCandidates
+): RequestHandler => async (req, res) => {
+    try {
+        res.status(200).json(await service(req.authentication?.accessToken ?? "", req.params.organizationId as string));
+    } catch (error) { sendError(res, error); }
+};
+
+router.get(
+    "/organizations/:organizationId/directory-profile/contact-routing/candidates",
+    requireAuthentication,
+    loadApplicationIdentity,
+    validateParams(organizationContactRequestParamsSchema),
+    requirePermission("business:update", (req) => req.params.organizationId as string),
+    createContactRoutingCandidatesHandler()
+);
+
+router.get(
+    "/contact-requests/inbox-organizations",
+    requireAuthentication,
+    loadApplicationIdentity,
+    createContactInboxOrganizationsHandler()
 );
 
 router.get(

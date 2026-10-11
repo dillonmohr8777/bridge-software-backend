@@ -159,3 +159,29 @@ export const transitionContactRequest = async (
         updatedAt: parsed.data.updated_at
     } };
 };
+
+export const listContactInboxOrganizations = async (accessToken: string) => {
+    const { data, error } = await createUserScopedSupabaseClient(accessToken)
+        .rpc("list_contact_inbox_organizations");
+    if (error) return mapRpcError(error);
+    const parsed = z.array(z.object({
+        organization_id: z.uuid(), organization_name: z.string()
+    })).safeParse(data ?? []);
+    if (!parsed.success) throw new ContactRequestServiceError("CONTACT_REQUEST_FAILED");
+    return { organizations: parsed.data.map((row) => ({
+        id: row.organization_id, name: row.organization_name
+    })) };
+};
+
+export const listContactRoutingCandidates = async (accessToken: string, organizationId: string) => {
+    const { data, error } = await createUserScopedSupabaseClient(accessToken)
+        .rpc("list_contact_routing_candidates", { p_organization_id: organizationId });
+    if (error) return mapRpcError(error);
+    const person = z.object({ userId: z.uuid(), displayName: z.string().nullable() });
+    const parsed = z.object({
+        salesRepresentatives: z.array(person.extend({ membershipId: z.uuid() })),
+        bridgeAdmin: person.nullable()
+    }).safeParse(data);
+    if (!parsed.success) throw new ContactRequestServiceError("CONTACT_REQUEST_FAILED");
+    return { candidates: parsed.data };
+};

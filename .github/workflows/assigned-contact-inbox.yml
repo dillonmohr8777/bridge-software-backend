@@ -1,0 +1,54 @@
+name: Assigned contact inbox
+on:
+  push:
+    branches: ["feature/assigned-contact-inbox-20261011"]
+  pull_request:
+    branches: ["fix/contact-request-forbidden-20261011"]
+concurrency:
+  group: assigned-inbox-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: ephemeral-test-only
+          POSTGRES_DB: bridge_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGDATABASE: bridge_test
+      PGPASSWORD: ephemeral-test-only
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: Execute migration history and authorization fixtures
+        run: |
+          psql -v ON_ERROR_STOP=1 -f test/sql/bootstrap.sql
+          for migration in supabase/migrations/*.sql; do
+            psql -v ON_ERROR_STOP=1 -f "$migration"
+          done
+          psql -v ON_ERROR_STOP=1 -f test/sql/assigned-contact-inbox.test.sql
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: assigned-contact-inbox-migration
+          path: supabase/migrations/*_assigned_contact_inbox.sql
