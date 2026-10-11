@@ -102,11 +102,11 @@ grant execute on function public.list_inbound_contact_requests(uuid,public.conta
 
 create or replace function public.list_contact_routing_candidates(p_organization_id uuid)
 returns jsonb language plpgsql stable security definer set search_path='' as $
-declare profile_id uuid;
+declare selected_profile_id uuid;
 begin
  if auth.uid() is null or not public.is_organization_admin(p_organization_id) then raise insufficient_privilege; end if;
- select dp.id into profile_id from public.directory_profiles dp where dp.organization_id=p_organization_id;
- if profile_id is null then raise no_data_found; end if;
+ select dp.id into selected_profile_id from public.directory_profiles dp where dp.organization_id=p_organization_id;
+ if selected_profile_id is null then raise no_data_found; end if;
  return jsonb_build_object(
    'salesRepresentatives',coalesce((
      select jsonb_agg(jsonb_build_object('membershipId',om.id,'userId',om.user_id,'displayName',up.display_name) order by up.display_name nulls last,om.id)
@@ -116,7 +116,7 @@ begin
    'bridgeAdmin',(
      select jsonb_build_object('userId',r.bridge_admin_user_id,'displayName',up.display_name)
      from public.directory_profile_contact_routing r join public.user_profiles up on up.id=r.bridge_admin_user_id
-     where r.profile_id=profile_id and exists(select 1 from public.user_platform_roles pr where pr.user_id=r.bridge_admin_user_id and pr.role='admin')
+     where r.profile_id=selected_profile_id and exists(select 1 from public.user_platform_roles pr where pr.user_id=r.bridge_admin_user_id and pr.role='admin')
    )
  );
 end $;
