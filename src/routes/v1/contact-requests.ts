@@ -36,6 +36,7 @@ const sendError = (res: Response, error: unknown): void => {
     const statuses: Record<ContactRequestServiceError["code"], number> = {
         CONTACT_REQUEST_NOT_FOUND: 404,
         CONTACT_REQUEST_INELIGIBLE: 403,
+        CONTACT_REQUEST_FORBIDDEN: 403,
         CONTACT_REQUEST_INVALID_TRANSITION: 409,
         CONTACT_REQUEST_FAILED: 500
     };
@@ -43,6 +44,8 @@ const sendError = (res: Response, error: unknown): void => {
         error: error.code,
         message: error.code === "CONTACT_REQUEST_NOT_FOUND"
             ? "Contact request or contactable profile not found."
+            : error.code === "CONTACT_REQUEST_FORBIDDEN"
+                ? "You do not have permission to perform this action."
             : error.code === "CONTACT_REQUEST_INELIGIBLE"
                 ? "Contact request eligibility is not satisfied."
                 : error.code === "CONTACT_REQUEST_INVALID_TRANSITION"
