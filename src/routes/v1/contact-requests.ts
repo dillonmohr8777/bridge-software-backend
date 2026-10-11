@@ -1,6 +1,7 @@
 import { Router, type RequestHandler, type Response } from "express";
 
 import { loadApplicationIdentity } from "../../middleware/application-identity.js";
+import { requirePermission } from "../../middleware/authorization.js";
 import { requireAuthentication } from "../../middleware/authentication.js";
 import { validateBody, validateParams, validateQuery } from "../../middleware/validation.js";
 import {
@@ -20,6 +21,7 @@ import {
     createContactRequest,
     listInboundContactRequests,
     listContactInboxOrganizations,
+    listContactRoutingCandidates,
     listSentContactRequests,
     transitionContactRequest
 } from "../../services/contact-requests.js";
@@ -145,6 +147,23 @@ export const createContactInboxOrganizationsHandler = (
         res.status(200).json(await service(req.authentication?.accessToken ?? ""));
     } catch (error) { sendError(res, error); }
 };
+
+export const createContactRoutingCandidatesHandler = (
+    service: typeof listContactRoutingCandidates = listContactRoutingCandidates
+): RequestHandler => async (req, res) => {
+    try {
+        res.status(200).json(await service(req.authentication?.accessToken ?? "", req.params.organizationId as string));
+    } catch (error) { sendError(res, error); }
+};
+
+router.get(
+    "/organizations/:organizationId/directory-profile/contact-routing/candidates",
+    requireAuthentication,
+    loadApplicationIdentity,
+    validateParams(organizationContactRequestParamsSchema),
+    requirePermission("business:update", (req) => req.params.organizationId as string),
+    createContactRoutingCandidatesHandler()
+);
 
 router.get(
     "/contact-requests/inbox-organizations",
