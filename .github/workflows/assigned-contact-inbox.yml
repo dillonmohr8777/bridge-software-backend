@@ -4,6 +4,9 @@ on:
     branches: ["feature/assigned-contact-inbox-20261011"]
   pull_request:
     branches: ["fix/contact-request-forbidden-20261011"]
+concurrency:
+  group: assigned-inbox-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -34,17 +37,6 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Generate migration with installed CLI
-        run: |
-          npx --no-install supabase --version
-          npx --no-install supabase migration new --help
-          npx --no-install supabase migration new assigned_contact_inbox
-          python - <<'PY'
-          import glob, pathlib
-          target = sorted(glob.glob("supabase/migrations/*_assigned_contact_inbox.sql"))[-1]
-          pathlib.Path(target).write_text(pathlib.Path("test/sql/assigned-contact-inbox.patch.sql").read_text())
-          print("GENERATED_MIGRATION=" + target)
-          PY
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
