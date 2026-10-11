@@ -11,7 +11,7 @@ process.env.EMAIL_VERIFICATION_REDIRECT_URL =
     "https://frontend.example.test/login?verified=true";
 process.env.PASSWORD_RESET_REDIRECT_URL = "http://localhost:5173/reset-password";
 
-const { registrationSchema } = await import(
+const { accountSettingsSchema, registrationSchema } = await import(
     "../src/schemas/authentication.js"
 );
 const {
@@ -21,7 +21,11 @@ const {
     logout
 } = await import("../src/services/authentication.js");
 const { authFailureStatus } = await import("../src/routes/v1/auth.js");
-const { createLoginHandler, createLogoutHandler } = await import(
+const {
+    createLoginHandler,
+    createLogoutHandler,
+    createUpdateAccountSettingsHandler
+} = await import(
     "../src/routes/v1/auth.js"
 );
 const {
@@ -88,6 +92,63 @@ test("registration remains valid without displayName", () => {
     });
 });
 
+test("empty account settings request is rejected", () => {
+    assert.equal(accountSettingsSchema.safeParse({}).success, false);
+});
+
+test("account settings reject unknown fields such as email", () => {
+    assert.equal(
+        accountSettingsSchema.safeParse({ email: "other@example.com" }).success,
+        false
+    );
+});
+
+test("account setting values are trimmed and may be cleared", () => {
+    assert.deepEqual(
+        accountSettingsSchema.parse({
+            displayName: "  Bridge Admin  ",
+            phone: "  +1 555 0100  "
+        }),
+        { displayName: "Bridge Admin", phone: "+1 555 0100" }
+    );
+    assert.deepEqual(
+        accountSettingsSchema.parse({ displayName: null, phone: null }),
+        { displayName: null, phone: null }
+    );
+});
+
+test("account settings handler scopes the update and returns the profile", async () => {
+    const input = { displayName: "Bridge Admin", phone: "+1 555 0100" };
+    let serviceArguments: unknown[] = [];
+    let status = 0;
+    let body: unknown;
+    await createUpdateAccountSettingsHandler(async (...arguments_) => {
+        serviceArguments = arguments_;
+        return input;
+    })(
+        {
+            authentication: {
+                user: { id: "11111111-1111-4111-8111-111111111111" },
+                accessToken: "authenticated-access-token"
+            },
+            body: input
+        } as never,
+        {
+            status(value: number) { status = value; return this; },
+            json(value: unknown) { body = value; return this; }
+        } as never,
+        (() => undefined) as never
+    );
+
+    assert.deepEqual(serviceArguments, [
+        "11111111-1111-4111-8111-111111111111",
+        "authenticated-access-token",
+        input
+    ]);
+    assert.equal(status, 200);
+    assert.deepEqual(body, { profile: input });
+});
+
 test("resend verification uses the configured email redirect", () => {
     assert.deepEqual(
         buildResendVerificationCredentials({ email: "user@example.com" }),
@@ -102,7 +163,7 @@ test("resend verification uses the configured email redirect", () => {
     );
 });
 
-test("successful login keeps credentials in HttpOnly cookies and returns only the user", async () => {
+test("successful login returns user only and issues HttpOnly cookie credentials", async () => {
     const result = {
         accessToken: "access-secret",
         refreshToken: "refresh-secret",
@@ -125,11 +186,12 @@ test("successful login keeps credentials in HttpOnly cookies and returns only th
         (() => undefined) as never
     );
     assert.deepEqual(body, { user: result.user });
-    assert.deepEqual(cookies.map(({ value }) => value), [
-        result.accessToken, result.refreshToken
-    ]);
-    assert.deepEqual(cookies.map(({ name }) => name), [
-        ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE
+    assert.ok(body && typeof body === "object");
+    assert.equal("accessToken" in body, false);
+    assert.equal("refreshToken" in body, false);
+    assert.deepEqual(cookies.map(({ name, value }) => ({ name, value })), [
+        { name: ACCESS_TOKEN_COOKIE, value: "access-secret" },
+        { name: REFRESH_TOKEN_COOKIE, value: "refresh-secret" }
     ]);
     for (const cookie of cookies) {
         assert.equal(cookie.options.httpOnly, true);
@@ -141,7 +203,7 @@ test("successful login keeps credentials in HttpOnly cookies and returns only th
     assert.equal("maxAge" in cookies[1]!.options, false);
 });
 
-test("Express emits both authentication Set-Cookie headers", async () => {
+test("Express returns user only and emits both HttpOnly auth cookies", async () => {
     const testApp = express();
     testApp.use(express.json());
     testApp.post("/api/v1/auth/login", createLoginHandler(async () => ({
@@ -167,16 +229,23 @@ test("Express emits both authentication Set-Cookie headers", async () => {
                 body: JSON.stringify({ email: "user@example.com", password: "secret" })
             }
         );
+        const responseBody = await response.json();
         const setCookies = response.headers.getSetCookie();
-        assert.equal(setCookies.length, 2);
-        assert.match(setCookies[0]!, /^bridge_access_token=/);
-        assert.match(setCookies[1]!, /^bridge_refresh_token=/);
-        assert.deepEqual(await response.json(), {
+
+        assert.deepEqual(responseBody, {
             user: {
                 id: "11111111-1111-4111-8111-111111111111",
                 email: "user@example.com"
             }
         });
+        assert.ok(responseBody && typeof responseBody === "object");
+        assert.equal("accessToken" in responseBody, false);
+        assert.equal("refreshToken" in responseBody, false);
+        assert.equal(setCookies.length, 2);
+        assert.match(setCookies[0]!, /^bridge_access_token=access-secret;/);
+        assert.match(setCookies[0]!, /; HttpOnly(?:;|$)/);
+        assert.match(setCookies[1]!, /^bridge_refresh_token=refresh-secret;/);
+        assert.match(setCookies[1]!, /; HttpOnly(?:;|$)/);
     } finally {
         await new Promise<void>((resolve, reject) =>
             server.close((error) => error ? reject(error) : resolve())

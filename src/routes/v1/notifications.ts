@@ -1,0 +1,15 @@
+import { Router,type RequestHandler,type Response } from "express";
+import { requireAuthentication } from "../../middleware/authentication.js";
+import { validateBody,validateParams,validateQuery } from "../../middleware/validation.js";
+import { notificationListQuerySchema,notificationParamsSchema,notificationPreferencesSchema,type NotificationListQuery,type NotificationPreferencesInput } from "../../schemas/notifications.js";
+import { NotificationServiceError,getNotificationPreferences,listNotifications,markAllNotificationsRead,markNotificationRead,putNotificationPreferences } from "../../services/notifications.js";
+const router=Router();
+const fail=(res:Response,e:unknown)=>{const known=e instanceof NotificationServiceError;res.status(known&&e.code==="NOTIFICATION_NOT_FOUND"?404:500).json({error:known?e.code:"INTERNAL_SERVER_ERROR",message:"The notification request could not be completed."});};
+const token=(req:{authentication?:{accessToken:string}})=>req.authentication?.accessToken??"";
+export const createListNotificationsHandler=(service:typeof listNotifications=listNotifications):RequestHandler=>async(req,res)=>{try{res.status(200).json(await service(token(req),res.locals.validatedQuery as NotificationListQuery));}catch(e){fail(res,e);}};
+router.get("/notifications",requireAuthentication,validateQuery(notificationListQuerySchema),createListNotificationsHandler());
+router.post("/notifications/:notificationId/read",requireAuthentication,validateParams(notificationParamsSchema),async(req,res)=>{try{res.status(200).json(await markNotificationRead(token(req),req.params.notificationId as string));}catch(e){fail(res,e);}});
+router.post("/notifications/read-all",requireAuthentication,async(req,res)=>{try{res.status(200).json(await markAllNotificationsRead(token(req)));}catch(e){fail(res,e);}});
+router.get("/notification-preferences",requireAuthentication,async(req,res)=>{try{res.status(200).json({preferences:await getNotificationPreferences(token(req))});}catch(e){fail(res,e);}});
+router.put("/notification-preferences",requireAuthentication,validateBody(notificationPreferencesSchema),async(req,res)=>{try{res.status(200).json({preferences:await putNotificationPreferences(token(req),req.body as NotificationPreferencesInput)});}catch(e){fail(res,e);}});
+export {router as notificationsRouter};

@@ -1,11 +1,15 @@
 import type { User } from "@supabase/supabase-js";
 import { z } from "zod";
 
+import { env } from "../config/index.js";
 import {
     createAdminSupabaseClient,
     SupabaseAdminNotConfiguredError
 } from "../lib/supabase.js";
-import type { AdminUsersQuery } from "../schemas/admin-users.js";
+import type {
+    AdminUserInvitationInput,
+    AdminUsersQuery
+} from "../schemas/admin-users.js";
 
 const profileRowSchema = z.object({
     id: z.uuid(),
@@ -30,6 +34,8 @@ const membershipRowSchema = z.object({
 });
 
 export type AdminUserFailureCode =
+    | "ADMIN_USER_ALREADY_EXISTS"
+    | "ADMIN_USER_INVITATION_FAILED"
     | "ADMIN_USERS_UNAVAILABLE"
     | "INTERNAL_SERVER_ERROR";
 
@@ -94,6 +100,116 @@ const getAdminClient = () => {
             throw new AdminUserServiceError("ADMIN_USERS_UNAVAILABLE");
         }
         throw new AdminUserServiceError("INTERNAL_SERVER_ERROR");
+    }
+};
+
+type AdminAuthFailure = {
+    code?: string | undefined;
+    message?: string | undefined;
+};
+
+const isDuplicateInvitation = (error: AdminAuthFailure): boolean => {
+    const code = error.code?.toLowerCase();
+    const message = error.message?.toLowerCase() ?? "";
+    return (
+        code === "email_exists" ||
+        code === "user_already_exists" ||
+        code === "identity_already_exists" ||
+        message.includes("already been registered") ||
+        message.includes("already exists")
+    );
+};
+
+export const inviteAdminUser = async (
+    actorUserId: string,
+    input: AdminUserInvitationInput
+) => {
+    const client = getAdminClient();
+    let invitedUserId: string | undefined;
+
+    try {
+        const { data: invitationData, error: invitationError } =
+            await client.auth.admin.inviteUserByEmail(input.email, {
+                redirectTo: env.EMAIL_VERIFICATION_REDIRECT_URL,
+                data: { display_name: input.displayName }
+            });
+
+        if (invitationError) {
+            if (isDuplicateInvitation(invitationError)) {
+                throw new AdminUserServiceError("ADMIN_USER_ALREADY_EXISTS");
+            }
+            throw new AdminUserServiceError("ADMIN_USERS_UNAVAILABLE");
+        }
+        if (!invitationData.user) {
+            throw new AdminUserServiceError("ADMIN_USERS_UNAVAILABLE");
+        }
+
+        invitedUserId = invitationData.user.id;
+        const profileResult = await client
+            .from("user_profiles")
+            .update({
+                display_name: input.displayName,
+                account_type: input.accountType
+            })
+            .eq("id", invitedUserId)
+            .select("id")
+            .maybeSingle();
+
+        if (profileResult.error || !profileResult.data) {
+            throw new AdminUserServiceError("ADMIN_USER_INVITATION_FAILED");
+        }
+
+        if (input.platformRole === "admin") {
+            const { error: roleError } = await client
+                .from("user_platform_roles")
+                .upsert(
+                    { user_id: invitedUserId, role: "admin" },
+                    { onConflict: "user_id,role" }
+                );
+            if (roleError) {
+                throw new AdminUserServiceError("ADMIN_USER_INVITATION_FAILED");
+            }
+        }
+
+        const { error: auditError } = await client.from("audit_logs").insert({
+            actor_user_id: actorUserId,
+            action: "create",
+            entity_type: "user_invitation",
+            entity_id: invitedUserId,
+            metadata: {
+                account_type: input.accountType,
+                platform_role: input.platformRole ?? null
+            }
+        });
+        if (auditError) {
+            throw new AdminUserServiceError("ADMIN_USER_INVITATION_FAILED");
+        }
+
+        return {
+            id: invitedUserId,
+            email: input.email,
+            displayName: input.displayName,
+            accountType: input.accountType,
+            platformRole: input.platformRole ?? null,
+            invitationSent: true as const
+        };
+    } catch (error) {
+        if (invitedUserId) {
+            try {
+                await client.auth.admin.deleteUser(invitedUserId);
+            } catch {
+                // The original failure is more actionable; never expose provider details.
+            }
+        }
+
+        if (error instanceof AdminUserServiceError) {
+            throw error;
+        }
+        throw new AdminUserServiceError(
+            invitedUserId
+                ? "ADMIN_USER_INVITATION_FAILED"
+                : "ADMIN_USERS_UNAVAILABLE"
+        );
     }
 };
 

@@ -1,12 +1,51 @@
 import { env } from "../config/index.js";
-import { createPublicSupabaseClient } from "../lib/supabase.js";
+import {
+    createPublicSupabaseClient,
+    createUserScopedSupabaseClient
+} from "../lib/supabase.js";
 import type {
+    AccountSettingsInput,
     EmailRequestInput,
     LoginInput,
     RecoverySessionInput,
     RegistrationInput,
     ResetPasswordInput
 } from "../schemas/authentication.js";
+
+export class AccountSettingsServiceError extends Error {
+    constructor() {
+        super("ACCOUNT_SETTINGS_UPDATE_FAILED");
+        this.name = "AccountSettingsServiceError";
+    }
+}
+
+export const updateAccountSettings = async (
+    userId: string,
+    accessToken: string,
+    input: AccountSettingsInput
+) => {
+    const changes = {
+        ...(input.displayName === undefined
+            ? {}
+            : { display_name: input.displayName }),
+        ...(input.phone === undefined ? {} : { phone: input.phone })
+    };
+    const { data, error } = await createUserScopedSupabaseClient(accessToken)
+        .from("user_profiles")
+        .update(changes)
+        .eq("id", userId)
+        .select("display_name, phone")
+        .maybeSingle();
+
+    if (error || !data) {
+        throw new AccountSettingsServiceError();
+    }
+
+    return {
+        displayName: data.display_name as string | null,
+        phone: data.phone as string | null
+    };
+};
 
 export type AuthenticationFailureCode =
     | "AUTH_REGISTRATION_FAILED"
