@@ -101,7 +101,7 @@ grant execute on function public.list_inbound_contact_requests(uuid,public.conta
  public.transition_contact_request(uuid,uuid,public.contact_request_status) to authenticated;
 
 create or replace function public.list_contact_routing_candidates(p_organization_id uuid)
-returns jsonb language plpgsql stable security definer set search_path='' as $
+returns jsonb language plpgsql stable security definer set search_path='' as $$
 declare selected_profile_id uuid;
 begin
  if auth.uid() is null or not public.is_organization_admin(p_organization_id) then raise insufficient_privilege; end if;
@@ -119,7 +119,7 @@ begin
      where r.profile_id=selected_profile_id and exists(select 1 from public.user_platform_roles pr where pr.user_id=r.bridge_admin_user_id and pr.role='admin')
    )
  );
-end $;
+end $$;
 revoke all on function public.list_contact_routing_candidates(uuid) from public,anon,authenticated;
 grant execute on function public.list_contact_routing_candidates(uuid) to authenticated;
 
