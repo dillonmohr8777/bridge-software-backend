@@ -64,3 +64,24 @@ test("database permission denials remain 403 through all contact service and HTT
         globalThis.fetch = originalFetch;
     }
 });
+
+test("inbox discovery and candidates validate and limit response fields", async () => {
+    const originalFetch = globalThis.fetch;
+    const userId = "66666666-6666-4666-8666-666666666666";
+    const membershipId = "77777777-7777-4777-8777-777777777777";
+    let payload: unknown = [{ organization_id: organizationId, organization_name: "First org", private_note: "hidden" }];
+    globalThis.fetch = async (_request, init) => {
+        assert.equal(new Headers(init?.headers).get("authorization"), "Bearer test-user-token");
+        return new Response(JSON.stringify(payload), { headers: { "Content-Type": "application/json" } });
+    };
+    try {
+        assert.deepEqual(await services.listContactInboxOrganizations("test-user-token"), { organizations: [{ id: organizationId, name: "First org" }] });
+        payload = { salesRepresentatives: [{ membershipId, userId, displayName: null, email: "private@example.test" }], bridgeAdmin: null, private_note: "hidden" };
+        assert.deepEqual(await services.listContactRoutingCandidates("test-user-token", organizationId), { candidates: { salesRepresentatives: [{ membershipId, userId, displayName: null }], bridgeAdmin: null } });
+        payload = { salesRepresentatives: [{ membershipId: "invalid", userId, displayName: null }], bridgeAdmin: null };
+        await assert.rejects(() => services.listContactRoutingCandidates("test-user-token", organizationId), (error: unknown) =>
+            error instanceof services.ContactRequestServiceError && error.code === "CONTACT_REQUEST_FAILED");
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
