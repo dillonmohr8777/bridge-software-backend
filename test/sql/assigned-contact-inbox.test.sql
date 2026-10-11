@@ -115,6 +115,38 @@ select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000006'
 select test_support.ok((select count(*)=0 from public.contact_requests),'revoked platform admin loses assigned access');
 reset role;
 
+
+-- Candidate discovery exposes only authorized, active same-organization reps.
+insert into auth.users(id,email) values('00000000-0000-4000-8000-000000000009','foreign-rep@example.test');
+update public.user_profiles set account_type='sales_rep' where id='00000000-0000-4000-8000-000000000009';
+insert into public.organization_members(id,organization_id,user_id,role) values('00000000-0000-4000-8000-000000000109','00000000-0000-4000-8000-000000000012','00000000-0000-4000-8000-000000000009','member');
+set local role authenticated;
+select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000004',true);
+select test_support.ok(jsonb_array_length(public.list_contact_routing_candidates('00000000-0000-4000-8000-000000000011')->'salesRepresentatives')=1,'standard former rep and foreign organization rep excluded from candidates');
+select test_support.ok(public.list_contact_routing_candidates('00000000-0000-4000-8000-000000000011')->'salesRepresentatives'->0->>'membershipId'='00000000-0000-4000-8000-000000000102','only remaining eligible same-org rep returned');
+select test_support.ok(public.list_contact_routing_candidates('00000000-0000-4000-8000-000000000011')->'bridgeAdmin'='null'::jsonb,'revoked configured platform admin omitted');
+select test_support.throws($q$select public.list_contact_routing_candidates('00000000-0000-4000-8000-000000000012')$q$,'42501','owner cannot enumerate another organization candidates');
+reset role;
+update public.user_profiles set account_type='sales_rep' where id='00000000-0000-4000-8000-000000000001';
+update public.organization_members set status='suspended' where id='00000000-0000-4000-8000-000000000101';
+insert into public.user_platform_roles(user_id,role) values('00000000-0000-4000-8000-000000000006','admin');
+set local role authenticated;
+select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000004',true);
+select test_support.ok(jsonb_array_length(public.list_contact_routing_candidates('00000000-0000-4000-8000-000000000011')->'salesRepresentatives')=1,'suspended rep excluded from candidates');
+select test_support.ok(public.list_contact_routing_candidates('00000000-0000-4000-8000-000000000011')->'bridgeAdmin'->>'userId'='00000000-0000-4000-8000-000000000006','only configured Bridge admin returned, not global roster');
+select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000006',true);
+select test_support.throws($q$select public.list_contact_routing_candidates('00000000-0000-4000-8000-000000000011')$q$,'42501','assigned platform admin cannot enumerate candidates without org ownership');
+select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000002',true);
+select test_support.throws($q$select public.list_contact_routing_candidates('00000000-0000-4000-8000-000000000011')$q$,'42501','assigned sales rep cannot enumerate candidates');
+select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000003',true);
+select test_support.throws($q$select public.list_contact_routing_candidates('00000000-0000-4000-8000-000000000011')$q$,'42501','page manager cannot enumerate candidates');
+reset role;
+update public.organization_members set status='active' where id='00000000-0000-4000-8000-000000000101';
+set local role authenticated;
+select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000004',true);
+select test_support.ok(jsonb_array_length(public.list_contact_routing_candidates('00000000-0000-4000-8000-000000000011')->'salesRepresentatives')=2,'owner sees both active same-org sales reps');
+reset role;
+
 select test_support.ok((select count(*)=3 from public.contact_request_history),'only successful transitions append history');
 select test_support.ok((select count(*)=3 from public.audit_logs where entity_type='contact_request'),'only successful transitions append audit');
 select test_support.ok(not has_table_privilege('authenticated','public.contact_requests','update'),'direct request mutation not granted');
