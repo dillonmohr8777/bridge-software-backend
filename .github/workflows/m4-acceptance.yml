@@ -1,0 +1,60 @@
+name: Bridge M4 backend acceptance
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: bridge-backend-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Discover installed local database commands
+        run: |
+          npx --no-install supabase --version
+          npx --no-install supabase init --help
+          npx --no-install supabase start --help
+          npx --no-install supabase test db --help
+          npx --no-install supabase stop --help
+      - name: Initialize isolated local configuration
+        run: npx --no-install supabase init
+      - name: Apply migrations to ephemeral local database
+        run: npx --no-install supabase start -x studio,imgproxy,edge-runtime,logflare,vector,supavisor,realtime > /tmp/bridge-supabase-start.log 2>&1
+      - name: Execute tenant and role SQL fixtures
+        run: npx --no-install supabase test db --local
+      - name: Report migration errors without credentials
+        if: failure()
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          p = pathlib.Path('/tmp/bridge-supabase-start.log')
+          if p.exists():
+              for line in p.read_text().splitlines():
+                  if re.search(r'error|failed|Applying migration|SQLSTATE|syntax|permission denied', line, re.I) and not re.search(r'key|token|secret|password|postgresql://', line, re.I):
+                      print(line)
+          PY
+      - name: Stop isolated local database
+        if: always()
+        run: npx --no-install supabase stop --no-backup > /dev/null 2>&1

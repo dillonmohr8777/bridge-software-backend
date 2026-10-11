@@ -15,4 +15,16 @@ export const adminUsersQuerySchema = z
     })
     .strict();
 
+export const adminUserInvitationSchema = z
+    .object({
+        email: z.string().trim().toLowerCase().email().max(254),
+        displayName: z.string().trim().min(1).max(100),
+        accountType: z.enum(["standard", "sales_rep"]).default("standard"),
+        platformRole: z.literal("admin").nullable().optional()
+    })
+    .strict();
+
 export type AdminUsersQuery = z.infer<typeof adminUsersQuerySchema>;
+export type AdminUserInvitationInput = z.infer<
+    typeof adminUserInvitationSchema
+>;

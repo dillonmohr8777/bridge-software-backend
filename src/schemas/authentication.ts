@@ -35,8 +35,21 @@ export const recoverySessionSchema = z.object({
     refreshToken: z.string().min(1)
 });
 
+export const accountSettingsSchema = z
+    .object({
+        displayName: z.string().trim().min(1).max(100).nullable().optional(),
+        phone: z.string().trim().max(30).nullable().optional()
+    })
+    .strict()
+    .refine(
+        (settings) =>
+            settings.displayName !== undefined || settings.phone !== undefined,
+        { message: "At least one account setting must be provided." }
+    );
+
 export type RegistrationInput = z.infer<typeof registrationSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type EmailRequestInput = z.infer<typeof emailRequestSchema>;
 export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type RecoverySessionInput = z.infer<typeof recoverySessionSchema>;
+export type AccountSettingsInput = z.infer<typeof accountSettingsSchema>;

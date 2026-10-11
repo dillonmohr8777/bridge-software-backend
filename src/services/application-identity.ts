@@ -16,7 +16,7 @@ const platformRoleSchema = z.object({
 
 const membershipSchema = z.object({
     organization_id: z.uuid(),
-    role: z.enum(["owner", "admin", "reviewer", "member"]),
+    role: z.enum(["owner", "admin", "page_manager", "reviewer", "member"]),
     status: z.literal("active"),
     organizations: z.object({
         id: z.uuid(),

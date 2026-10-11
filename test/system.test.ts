@@ -9,6 +9,7 @@ process.env.SUPABASE_ANON_KEY = "test-anon-key";
 process.env.SUPABASE_SERVICE_ROLE_KEY = "test-service-role-key";
 process.env.CORS_ORIGINS = [
     "http://localhost:3000",
+    "http://localhost:5173",
     "https://bridge-connected-signal-dev.netlify.app",
     "https://bridge-connected-signal.netlify.app"
 ].join(",");
@@ -84,6 +85,7 @@ test("v1 version is public and does not expose sensitive configuration", async (
 
 for (const origin of [
     "http://localhost:3000",
+    "http://localhost:5173",
     "https://bridge-connected-signal-dev.netlify.app",
     "https://bridge-connected-signal.netlify.app"
 ]) {

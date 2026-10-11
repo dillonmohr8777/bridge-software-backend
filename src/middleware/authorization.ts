@@ -11,6 +11,7 @@ export const PERMISSIONS = [
     "organization:members_manage",
     "business:read",
     "business:update",
+    "directory_profile:content_update",
     "verification:read",
     "verification:submit",
     "verification:review",
@@ -18,9 +19,13 @@ export const PERMISSIONS = [
     "document:upload",
     "document:review",
     "audit:read",
+    "contact_request:read",
+    "contact_request:update",
     "admin:verification_queue",
     "admin:verification_review",
+    "admin:directory_review",
     "admin:users_read",
+    "admin:users_write",
     "ein:reveal"
 ] as const;
 
@@ -31,13 +36,21 @@ const rolePermissions: Record<OrganizationRole, ReadonlySet<Permission>> = {
         "organization:read", "organization:update",
         "organization:members_manage", "business:read", "business:update",
         "verification:read", "verification:submit", "verification:review",
-        "document:read", "document:upload", "document:review", "audit:read"
+        "document:read", "document:upload", "document:review", "audit:read",
+        "contact_request:read", "contact_request:update",
+        "directory_profile:content_update"
     ]),
     admin: new Set([
         "organization:read", "organization:update",
         "organization:members_manage", "business:read", "business:update",
         "verification:read", "verification:submit", "verification:review",
-        "document:read", "document:upload", "document:review", "audit:read"
+        "document:read", "document:upload", "document:review", "audit:read",
+        "contact_request:read", "contact_request:update",
+        "directory_profile:content_update"
+    ]),
+    page_manager: new Set([
+        "organization:read", "business:read", "verification:read",
+        "document:read", "directory_profile:content_update"
     ]),
     reviewer: new Set([
         "organization:read", "business:read", "verification:read",
@@ -52,7 +65,9 @@ const rolePermissions: Record<OrganizationRole, ReadonlySet<Permission>> = {
 const platformPermissions: ReadonlySet<Permission> = new Set([
     "admin:verification_queue",
     "admin:verification_review",
+    "admin:directory_review",
     "admin:users_read",
+    "admin:users_write",
     "ein:reveal"
 ]);
 

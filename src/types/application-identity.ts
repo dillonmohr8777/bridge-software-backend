@@ -1,4 +1,9 @@
-export type OrganizationRole = "owner" | "admin" | "reviewer" | "member";
+export type OrganizationRole =
+    | "owner"
+    | "admin"
+    | "page_manager"
+    | "reviewer"
+    | "member";
 
 export type OrganizationType = "brand" | "retailer" | "dispensary";
 

@@ -9,11 +9,13 @@ import {
     setAuthCookies
 } from "../../http/auth-cookies.js";
 import {
+    accountSettingsSchema,
     emailRequestSchema,
     loginSchema,
     recoverySessionSchema,
     registrationSchema,
     resetPasswordSchema,
+    type AccountSettingsInput,
     type EmailRequestInput,
     type LoginInput,
     type RecoverySessionInput,
@@ -21,6 +23,7 @@ import {
     type ResetPasswordInput
 } from "../../schemas/authentication.js";
 import {
+    AccountSettingsServiceError,
     AuthenticationServiceError,
     establishRecoverySession,
     login,
@@ -28,7 +31,8 @@ import {
     register,
     requestPasswordReset,
     resendVerification,
-    resetPassword
+    resetPassword,
+    updateAccountSettings
 } from "../../services/authentication.js";
 
 const router = Router();
@@ -192,6 +196,45 @@ router.post(
             sendAuthFailure(res, error);
         }
     }
+);
+
+export const createUpdateAccountSettingsHandler = (
+    service: typeof updateAccountSettings = updateAccountSettings
+): RequestHandler => async (req, res) => {
+    const authentication = req.authentication;
+    if (!authentication) {
+        res.status(401).json({
+            error: "UNAUTHORIZED",
+            message: "A valid authentication credential is required."
+        });
+        return;
+    }
+
+    try {
+        const profile = await service(
+            authentication.user.id,
+            authentication.accessToken,
+            req.body as AccountSettingsInput
+        );
+        res.status(200).json({ profile });
+    } catch (error) {
+        const known = error instanceof AccountSettingsServiceError;
+        res.status(500).json({
+            error: known
+                ? "ACCOUNT_SETTINGS_UPDATE_FAILED"
+                : "INTERNAL_SERVER_ERROR",
+            message: known
+                ? "Account settings could not be updated."
+                : "An unexpected error occurred."
+        });
+    }
+};
+
+router.patch(
+    "/me",
+    requireAuthentication,
+    validateBody(accountSettingsSchema),
+    createUpdateAccountSettingsHandler()
 );
 
 router.get("/me", requireAuthentication, loadApplicationIdentity, (req, res) => {
