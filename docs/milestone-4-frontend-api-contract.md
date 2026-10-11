@@ -505,7 +505,7 @@ Routing order is: configured active Sales Rep; configured valid Bridge Admin; ac
 
 ### GET `/organizations/:organizationId/contact-requests`
 
-Auth: owner/admin with `contact_request:read`. Query: optional `status=new|viewed|responded|closed`, `limit=1..50`, `offset=0..10000`.
+Auth: organization owner/admin, or the request's assigned recipient. Assigned active same-organization sales reps and assigned current Bridge admins see only their own requests; platform admin status alone grants no inbox. Query: optional `status=new|viewed|responded|closed`, `limit=1..50`, `offset=0..10000`.
 
 ```json
 {
@@ -545,7 +545,7 @@ Auth required. Query: `limit`, `offset` as above.
 
 ### POST `/organizations/:organizationId/contact-requests/:requestId/status`
 
-Auth: owner/admin with `contact_request:update`.
+Auth: organization owner/admin, or the specific request's assigned active sales rep/current Bridge admin. Authorization is enforced in the user-JWT SQL RPC for the exact organization/request pair; inaccessible requests return 404.
 
 ```json
 { "status": "responded" }
@@ -621,3 +621,23 @@ Success 200 wraps the submitted values in `{ "preferences": ... }`. Errors: 400,
 ## Publication and integration notes
 
 All public profile fields—including legal/DBA names, type, categories, location, story, links, public contact, license display, and logo reference—come from immutable version snapshots. Editing working version B does not change public version A; only admin approval atomically switches the published version. LeafLink, Weedmaps, wholesale synchronization, product synchronization, SMS, chat, and delivery-worker implementation are intentionally out of scope.
+
+## Assigned recipient inbox and routing candidates
+
+These additive endpoints require migration `20261011225255_assigned_contact_inbox.sql` and the matching backend release. A frontend must show a recoverable unavailable state when an older backend does not yet provide them.
+
+### GET `/contact-requests/inbox-organizations`
+
+Auth required. Success 200: `{"organizations":[{"id":"organization UUID","name":"Organization name"}]}`. Returns organizations where the caller is owner/admin or currently has an authorized assigned request. It does not enumerate all organizations for platform admins. A recipient with no assigned requests receives an empty array.
+
+### GET `/organizations/:organizationId/directory-profile/contact-routing/candidates`
+
+Auth: organization owner/admin only, enforced in HTTP permission checks and SQL. Success 200:
+
+```json
+{"candidates":{"salesRepresentatives":[{"membershipId":"membership UUID","userId":"user UUID","displayName":"Sales rep"}],"bridgeAdmin":{"userId":"configured admin UUID","displayName":"Bridge admin"}}}
+```
+
+Display names may be null; `bridgeAdmin` may be null. Only active same-organization sales-rep memberships and the currently configured, still-valid Bridge admin are returned. No email addresses or global admin roster are exposed. Use the existing contact-routing PUT to select an eligible sales rep, retain a configured Bridge admin, or clear either assignment with null. Selecting a new Bridge admin remains an admin/support configuration workflow; this endpoint does not provide a global selector. Existing routing order and owner fallback remain unchanged. Errors: 400, 401, 403, 404, 500.
+
+Assigned recipients cannot change routing. Membership suspension, loss of sales-rep account type, or loss of platform-admin role removes recipient access immediately. Ordinary members, unrelated reps/admins, and request senders receive no new privileges. Direct table updates remain ungranted; status changes preserve lifecycle validation, history, and audit.
